@@ -1,1 +1,12 @@
-
+version: '3.8'
+services:
+  node:
+    build: .
+    ports:
+      - "3010:3010"
+    depends_on:
+      - python
+  python:
+    build: ./python-service
+    ports:
+      - "8000:8000"
