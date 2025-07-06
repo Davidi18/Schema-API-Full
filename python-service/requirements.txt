@@ -1,3 +1,6 @@
-fastapi
-uvicorn[standard]
-advertools
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+advertools==0.13.2
+aiohttp==3.9.1
+pandas==2.1.4
+lxml==4.9.3
