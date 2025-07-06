@@ -1,17 +1,20 @@
 {
   "name": "schema-api-full",
-  "version": "1.0.0",
-  "type": "module",
+  "version": "2.0.0",
+  "description": "Complete Schema.org API with sitemap analysis, text processing, and schema generation",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js"
   },
   "dependencies": {
-    "axios": "^1.4.0",
+    "axios": "^1.6.0",
     "cheerio": "^1.0.0-rc.12",
-    "cors": "^2.8.5",
+    "cors": "^2.8.5", 
     "express": "^4.18.2",
-    "xml2js": "^0.4.23"
-  }
+    "xml2js": "^0.6.2"
+  },
+  "keywords": ["schema", "sitemap", "seo", "api"],
+  "author": "Strudel Marketing",
+  "license": "MIT"
 }
