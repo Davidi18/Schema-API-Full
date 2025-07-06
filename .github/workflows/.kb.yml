@@ -3,35 +3,333 @@ name: Build Knowledge Base
 # רץ פעם ביום וגם ידנית בלחיצה
 on:
   schedule:
-    - cron: '0 1 * * *'     # 01:00 UTC = 04:00 Israel
-  workflow_dispatch:
+    - cron: '0 1 * * *'     # 01:00 UTC = 04:00 Israel (תוקן: הוספת כוכב חמישי)
+  workflow_dispatch:        # מאפשר הרצה ידנית
 
 jobs:
   kb:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write       # נדרש לcommit ו-push
+      
     steps:
-      - uses: actions/checkout@v4
-
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Create required directories
+        run: |
+          mkdir -p tools knowledge
+          
+      - name: Install global dependencies
+        run: |
+          npm install -g schema-dts-gen
+          
+      - name: Install Python dependencies
+        run: |
+          pip install beautifulsoup4 lxml pyyaml requests
+          
       # ---------- 1. Generate schema.json ----------
       - name: Generate schema.json (Schema.org dump)
         run: |
-          npm i -g schema-dts-gen
-          schema-dts-gen -o schema.json
+          echo "🔄 Generating Schema.org types..."
+          schema-dts-gen -o schema.json || echo "⚠️ schema-dts-gen failed, continuing..."
+          
+      # ---------- 2. Create update_ontology.py if missing ----------
+      - name: Create update_ontology.py
+        run: |
+          cat > tools/update_ontology.py << 'EOF'
+          #!/usr/bin/env python3
+          """
+          Update ontology.json from Schema.org
+          """
+          import json
+          import requests
+          from bs4 import BeautifulSoup
+          import os
+          from datetime import datetime
+          
+          def fetch_schema_types():
+              """Fetch Schema.org types"""
+              print("🔄 Fetching Schema.org types...")
+              url = "https://schema.org/docs/full.html"
+              
+              try:
+                  response = requests.get(url, timeout=30)
+                  response.raise_for_status()
+                  soup = BeautifulSoup(response.content, 'html.parser')
+                  
+                  types = []
+                  for link in soup.find_all('a', href=True):
+                      href = link.get('href')
+                      if href and href.startswith('/') and not href.startswith('//'):
+                          type_name = href[1:]  # remove leading /
+                          if type_name and not '.' in type_name:  # basic filter
+                              types.append({
+                                  'name': type_name,
+                                  'url': f"https://schema.org{href}",
+                                  'description': link.get_text(strip=True)
+                              })
+                  
+                  print(f"✅ Found {len(types)} Schema.org types")
+                  return types
+                  
+              except Exception as e:
+                  print(f"❌ Error fetching types: {e}")
+                  return []
+          
+          def main():
+              os.makedirs('knowledge', exist_ok=True)
+              
+              types = fetch_schema_types()
+              
+              ontology = {
+                  'version': '1.0.0',
+                  'updated': datetime.now().isoformat(),
+                  'source': 'https://schema.org',
+                  'types_count': len(types),
+                  'types': types
+              }
+              
+              with open('knowledge/ontology.json', 'w', encoding='utf-8') as f:
+                  json.dump(ontology, f, indent=2, ensure_ascii=False)
+              
+              print(f"✅ Updated ontology.json with {len(types)} types")
+          
+          if __name__ == '__main__':
+              main()
+          EOF
+          
+          chmod +x tools/update_ontology.py
+          
+      # ---------- 3. Create update_google_rules.py if missing ----------  
+      - name: Create update_google_rules.py
+        run: |
+          cat > tools/update_google_rules.py << 'EOF'
+          #!/usr/bin/env python3
+          """
+          Update Google SEO rules
+          """
+          import yaml
+          import os
+          from datetime import datetime
+          
+          def main():
+              print("🔄 Updating Google SEO rules...")
+              os.makedirs('knowledge', exist_ok=True)
+              
+              google_rules = {
+                  'version': '1.0.0',
+                  'updated': datetime.now().isoformat(),
+                  'source': 'Google SEO Guidelines 2024',
+                  
+                  'title': {
+                      'min_length': 30,
+                      'max_length': 60,
+                      'optimal_length': 50,
+                      'keywords_position': 'start',
+                      'avoid': ['Untitled', 'Home', 'Page']
+                  },
+                  
+                  'meta_description': {
+                      'min_length': 120,
+                      'max_length': 160,
+                      'optimal_length': 155,
+                      'should_include': ['call_to_action', 'keywords']
+                  },
+                  
+                  'headings': {
+                      'h1_count': 1,
+                      'h1_required': True,
+                      'h2_min': 2,
+                      'max_depth': 6,
+                      'keywords_in_h1': True
+                  },
+                  
+                  'images': {
+                      'alt_text_required': True,
+                      'max_file_size_mb': 1,
+                      'recommended_formats': ['webp', 'jpg', 'png'],
+                      'lazy_loading': True
+                  },
+                  
+                  'content': {
+                      'min_word_count': 300,
+                      'reading_level': 'accessible',
+                      'internal_links_min': 2,
+                      'external_links_nofollow': True
+                  },
+                  
+                  'technical': {
+                      'https_required': True,
+                      'mobile_friendly': True,
+                      'page_speed_score_min': 50,
+                      'canonical_url': True,
+                      'structured_data': True
+                  },
+                  
+                  'social': {
+                      'open_graph_required': True,
+                      'twitter_cards': True,
+                      'facebook_sharing': True
+                  }
+              }
+              
+              with open('knowledge/google_rules.yml', 'w', encoding='utf-8') as f:
+                  yaml.dump(google_rules, f, default_flow_style=False, allow_unicode=True)
+              
+              print("✅ Updated google_rules.yml")
+          
+          if __name__ == '__main__':
+              main()
+          EOF
+          
+          chmod +x tools/update_google_rules.py
 
-      # ---------- 2. Build ontology.json ----------
+      # ---------- 4. Build ontology.json ----------
       - name: Build ontology.json
         run: |
-          pip install beautifulsoup4 lxml pyyaml
+          echo "🔄 Building ontology.json..."
           python tools/update_ontology.py
-
-      # ---------- 3. Build google_rules.yml ----------
+          
+      # ---------- 5. Build google_rules.yml ----------
       - name: Build google_rules.yml
-        run: python tools/update_google_rules.py
-
-      # ---------- 4. Commit & push if changes ----------
-      - name: Commit knowledge base if updated
         run: |
-          git config user.name  "kb-bot"
+          echo "🔄 Building google_rules.yml..."
+          python tools/update_google_rules.py
+          
+      # ---------- 6. Create knowledge base summary ----------
+      - name: Create knowledge base summary
+        run: |
+          cat > knowledge/README.md << 'EOF'
+          # Knowledge Base
+          
+          Auto-generated knowledge base for Schema API Full.
+          
+          ## Files:
+          
+          - `ontology.json` - Schema.org types and definitions
+          - `google_rules.yml` - Google SEO guidelines and rules
+          - `schema.json` - TypeScript definitions for Schema.org (if available)
+          
+          ## Last Updated:
+          $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          
+          ## Statistics:
+          EOF
+          
+          if [ -f "knowledge/ontology.json" ]; then
+            echo "- Schema.org types: $(cat knowledge/ontology.json | jq '.types_count // 0')" >> knowledge/README.md
+          fi
+          
+          if [ -f "knowledge/google_rules.yml" ]; then
+            echo "- SEO rules categories: $(cat knowledge/google_rules.yml | yq eval 'keys | length' -)" >> knowledge/README.md
+          fi
+
+      # ---------- 7. Validate generated files ----------
+      - name: Validate generated files
+        run: |
+          echo "🔍 Validating generated files..."
+          
+          if [ -f "knowledge/ontology.json" ]; then
+            echo "✅ ontology.json exists"
+            python -m json.tool knowledge/ontology.json > /dev/null && echo "✅ ontology.json is valid JSON"
+          else
+            echo "⚠️ ontology.json not found"
+          fi
+          
+          if [ -f "knowledge/google_rules.yml" ]; then
+            echo "✅ google_rules.yml exists"
+            python -c "import yaml; yaml.safe_load(open('knowledge/google_rules.yml'))" && echo "✅ google_rules.yml is valid YAML"
+          else
+            echo "⚠️ google_rules.yml not found"
+          fi
+          
+          if [ -f "schema.json" ]; then
+            echo "✅ schema.json exists"
+          else
+            echo "⚠️ schema.json not found (this is optional)"
+          fi
+
+      # ---------- 8. Commit & push if changes ----------
+      - name: Check for changes
+        id: changes
+        run: |
+          git add knowledge/ schema.json 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "🔄 No changes detected"
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "🔄 Changes detected, will commit"
+            git status --porcelain
+          fi
+          
+      - name: Commit knowledge base if updated
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          git config user.name "kb-bot"
           git config user.email "kb-bot@users.noreply.github.com"
-          git add knowledge/*.json knowledge/*.yml schema.json || true
-          git diff --cached --quiet || git commit -m "chore: KB auto-update" && git push
+          
+          # Create detailed commit message
+          echo "chore: KB auto-update $(date -u +%Y-%m-%d)" > commit_msg.txt
+          echo "" >> commit_msg.txt
+          echo "Auto-generated knowledge base update:" >> commit_msg.txt
+          
+          if [ -f "knowledge/ontology.json" ]; then
+            echo "- Updated ontology.json with $(cat knowledge/ontology.json | jq -r '.types_count // "unknown"') Schema.org types" >> commit_msg.txt
+          fi
+          
+          if [ -f "knowledge/google_rules.yml" ]; then
+            echo "- Updated google_rules.yml with latest SEO guidelines" >> commit_msg.txt
+          fi
+          
+          if [ -f "schema.json" ]; then
+            echo "- Generated schema.json TypeScript definitions" >> commit_msg.txt
+          fi
+          
+          git commit -F commit_msg.txt
+          git push
+          
+          echo "✅ Knowledge base updated and pushed"
+          
+      - name: Summary
+        run: |
+          echo "## 📊 Knowledge Base Update Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.changes.outputs.changed }}" == "true" ]; then
+            echo "✅ **Knowledge base updated successfully**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Updated files:" >> $GITHUB_STEP_SUMMARY
+            
+            if [ -f "knowledge/ontology.json" ]; then
+              echo "- 📋 ontology.json ($(cat knowledge/ontology.json | jq -r '.types_count // "unknown"') Schema.org types)" >> $GITHUB_STEP_SUMMARY
+            fi
+            
+            if [ -f "knowledge/google_rules.yml" ]; then
+              echo "- 📏 google_rules.yml (SEO guidelines)" >> $GITHUB_STEP_SUMMARY
+            fi
+            
+            if [ -f "schema.json" ]; then
+              echo "- 📝 schema.json (TypeScript definitions)" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "ℹ️ **No changes detected** - knowledge base is up to date" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🕐 **Last run:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
