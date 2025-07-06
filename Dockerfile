@@ -1,8 +1,24 @@
 FROM node:18-alpine
 WORKDIR /app
+
+# Copy package files
 COPY package*.json ./
-RUN npm install --production
-COPY . ./
-ENV PYTHON_BASE_URL=http://python:8000
+
+# Install dependencies
+RUN npm install --production && npm cache clean --force
+
+# Copy application code
+COPY index.js ./
+
+# Add wget for healthcheck
+RUN apk add --no-cache wget
+
+# Expose port
 EXPOSE 3010
-CMD ["npm","start"]
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD wget --quiet --tries=1 --spider http://localhost:3010/ || exit 1
+
+# Start application
+CMD ["npm", "start"]
