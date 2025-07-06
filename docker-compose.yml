@@ -4,9 +4,19 @@ services:
     build: .
     ports:
       - "3010:3010"
-    depends_on:
-      - python
-  python:
-    build: ./python-service
-    ports:
-      - "8000:8000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3010
+    networks:
+      - schema-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3010/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  schema-network:
+    driver: bridge
