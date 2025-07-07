@@ -79,8 +79,30 @@ function analyzeUrlClustering(urls) {
       const pathParts = urlObj.pathname.split('/').filter(Boolean);
       const hasParams = urlObj.search.length > 0;
       
-      // 1. Main category analysis (first path segment)
-      const mainCategory = pathParts[0] || 'root';
+      // 1. Smart main category analysis (handles Hebrew URL encoding)
+      let mainCategory = pathParts[0] || 'root';
+      
+      // If first segment is URL-encoded Hebrew, try to decode or use next segment
+      if (mainCategory.includes('%D7%') || mainCategory.includes('%D6%')) {
+        try {
+          // Try to decode the Hebrew text
+          const decoded = decodeURIComponent(mainCategory);
+          // If successfully decoded and looks like Hebrew, use it
+          if (decoded && decoded.match(/[\u0590-\u05FF]/)) {
+            mainCategory = decoded;
+          }
+        } catch (e) {
+          // If decoding fails and there's a next segment, check if it's a known category
+          if (pathParts.length > 1) {
+            const nextSegment = pathParts[1];
+            // If next segment looks like English category, use it instead
+            if (nextSegment && !nextSegment.includes('%') && nextSegment.match(/^[a-zA-Z-]+$/)) {
+              mainCategory = nextSegment;
+            }
+          }
+        }
+      }
+      
       byMainCategory[mainCategory] = (byMainCategory[mainCategory] || 0) + 1;
       
       // 2. Depth analysis
@@ -94,13 +116,30 @@ function analyzeUrlClustering(urls) {
         lastPart.split('.').pop().toLowerCase() : 'no_extension';
       byFileType[fileExtension] = (byFileType[fileExtension] || 0) + 1;
       
-      // 4. Path pattern analysis (for dynamic routes)
-      const fullPath = pathParts.join('/');
+      // 4. Smart path pattern analysis (decode Hebrew for patterns)
+      let fullPath = pathParts.join('/');
       if (fullPath) {
-        // Detect patterns like /product/123, /blog/2024/01/post
-        const pattern = fullPath.replace(/\d+/g, '[ID]')
-                                 .replace(/\b\d{4}\b/g, '[YEAR]')
-                                 .replace(/\b\d{2}\b/g, '[NUM]');
+        // Try to decode Hebrew segments for better pattern detection
+        const decodedParts = pathParts.map(part => {
+          if (part.includes('%D7%') || part.includes('%D6%')) {
+            try {
+              return decodeURIComponent(part);
+            } catch (e) {
+              return part;
+            }
+          }
+          return part;
+        });
+        
+        const decodedPath = decodedParts.join('/');
+        
+        // Detect patterns like /blog/מאמר, /products/123, /blog/2024/01/post
+        const pattern = decodedPath
+          .replace(/\d+/g, '[ID]')
+          .replace(/\b\d{4}\b/g, '[YEAR]')
+          .replace(/\b\d{2}\b/g, '[NUM]')
+          .replace(/[\u0590-\u05FF]+/g, '[HEBREW]'); // Replace Hebrew text with [HEBREW]
+          
         pathPatterns[pattern] = (pathPatterns[pattern] || 0) + 1;
       }
       
