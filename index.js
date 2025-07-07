@@ -11,7 +11,7 @@ app.use(express.json());
 const PORT = process.env.PORT || 3010;
 
 // Recursive sitemap parsing function
-async function getAllUrlsFromSitemap(sitemapUrl, maxDepth = 2, currentDepth = 0, maxUrls = 1000) {
+async function getAllUrlsFromSitemap(sitemapUrl, maxDepth = 2, currentDepth = 0, maxUrls = 10000) {
   if (currentDepth >= maxDepth) return [];
   
   try {
@@ -65,6 +65,84 @@ async function getAllUrlsFromSitemap(sitemapUrl, maxDepth = 2, currentDepth = 0,
   }
 }
 
+// Enhanced clustering function
+function analyzeUrlClustering(urls) {
+  const byMainCategory = {};
+  const byDepth = {};
+  const byFileType = {};
+  const pathPatterns = {};
+  const parameterAnalysis = {};
+  
+  urls.forEach(urlString => {
+    try {
+      const urlObj = new URL(urlString);
+      const pathParts = urlObj.pathname.split('/').filter(Boolean);
+      const hasParams = urlObj.search.length > 0;
+      
+      // 1. Main category analysis (first path segment)
+      const mainCategory = pathParts[0] || 'root';
+      byMainCategory[mainCategory] = (byMainCategory[mainCategory] || 0) + 1;
+      
+      // 2. Depth analysis
+      const depth = pathParts.length;
+      const depthKey = `depth_${depth}`;
+      byDepth[depthKey] = (byDepth[depthKey] || 0) + 1;
+      
+      // 3. File type analysis
+      const lastPart = pathParts[pathParts.length - 1] || '';
+      const fileExtension = lastPart.includes('.') ? 
+        lastPart.split('.').pop().toLowerCase() : 'no_extension';
+      byFileType[fileExtension] = (byFileType[fileExtension] || 0) + 1;
+      
+      // 4. Path pattern analysis (for dynamic routes)
+      const fullPath = pathParts.join('/');
+      if (fullPath) {
+        // Detect patterns like /product/123, /blog/2024/01/post
+        const pattern = fullPath.replace(/\d+/g, '[ID]')
+                                 .replace(/\b\d{4}\b/g, '[YEAR]')
+                                 .replace(/\b\d{2}\b/g, '[NUM]');
+        pathPatterns[pattern] = (pathPatterns[pattern] || 0) + 1;
+      }
+      
+      // 5. Parameter analysis
+      if (hasParams) {
+        const params = new URLSearchParams(urlObj.search);
+        params.forEach((value, key) => {
+          parameterAnalysis[key] = (parameterAnalysis[key] || 0) + 1;
+        });
+      }
+      
+    } catch (e) {
+      // Skip invalid URLs
+      console.warn('Invalid URL skipped:', urlString);
+    }
+  });
+  
+  // Sort all results by count (descending)
+  const sortByCount = (obj) => 
+    Object.entries(obj)
+      .sort(([,a], [,b]) => b - a)
+      .reduce((sorted, [key, value]) => ({ ...sorted, [key]: value }), {});
+  
+  return {
+    by_main_category: sortByCount(byMainCategory),
+    by_depth: sortByCount(byDepth),
+    by_file_type: sortByCount(byFileType),
+    by_path_patterns: sortByCount(pathPatterns),
+    by_parameters: sortByCount(parameterAnalysis),
+    
+    // Summary insights (raw data, not conclusions)
+    summary: {
+      total_analyzed: urls.length,
+      categories_found: Object.keys(byMainCategory).length,
+      depth_levels: Object.keys(byDepth).length,
+      file_types: Object.keys(byFileType).length,
+      unique_patterns: Object.keys(pathPatterns).length,
+      urls_with_parameters: Object.values(parameterAnalysis).reduce((sum, count) => sum + count, 0)
+    }
+  };
+}
+
 // Health Check
 app.get('/', (req, res) => {
   res.json({ 
@@ -72,65 +150,93 @@ app.get('/', (req, res) => {
     service: 'schema-api-complete',
     version: '2.0.0',
     features: [
-      'Recursive sitemap analysis',
+      'Complete sitemap analysis with clustering',
       'Schema.org generation', 
       'Text tokenization',
-      'URL clustering',
       'Entity validation',
       'Existing schema extraction'
     ],
     endpoints: {
       'GET /': 'Health check',
-      'POST /sitemap': 'Recursive sitemap analysis with deep crawling',
+      'POST /sitemap': 'Complete sitemap analysis with advanced URL clustering',
       'POST /extract': 'Text analysis and tokenization (supports Hebrew)',
       'POST /schema': 'Generate Schema.org markup from URL',
-      'POST /cluster': 'Cluster URLs by directory structure',
       'POST /validate-entity': 'Validate Schema.org entities',
       'POST /existing-schema': 'Extract existing structured data'
     }
   });
 });
 
-// 1. Recursive Sitemap Analysis
+// 1. Enhanced Sitemap Analysis with Clustering
 app.post('/sitemap', async (req, res) => {
   try {
-    const { url, max_urls = 100, deep_crawl = true, max_depth = 2 } = req.body;
-    if (!url) return res.status(400).json({ error: 'Missing url parameter' });
+    const { url, max_urls = 10000, deep_crawl = true, max_depth = 2 } = req.body;
     
-    console.log(`Sitemap analysis: ${url}, deep_crawl: ${deep_crawl}, max_depth: ${max_depth}`);
-    
-    let urls = [];
-    
-    if (deep_crawl) {
-      // Deep recursive crawling
-      urls = await getAllUrlsFromSitemap(url, max_depth, 0, max_urls);
-    } else {
-      // Simple single-level parsing
-      const response = await axios.get(url, { timeout: 15000 });
-      const parser = new xml2js.Parser();
-      const result = await parser.parseStringPromise(response.data);
-      
-      if (result.urlset?.url) {
-        urls = result.urlset.url.map(u => u.loc[0]);
-      } else if (result.sitemapindex?.sitemap) {
-        urls = result.sitemapindex.sitemap.map(s => s.loc[0]);
+    if (!url) return res.status(400).json({ 
+      error: 'Missing url parameter',
+      example: { 
+        url: 'https://example.com/sitemap.xml', 
+        max_urls: 10000,
+        deep_crawl: true,
+        max_depth: 2
       }
+    });
+    
+    console.log(`Sitemap analysis: ${url}, max_urls: ${max_urls}, deep_crawl: ${deep_crawl}`);
+    
+    // Get URLs from sitemap (recursive)
+    const urls = await getAllUrlsFromSitemap(url, max_depth, 0, max_urls);
+    
+    if (urls.length === 0) {
+      return res.json({
+        success: false,
+        error: 'No URLs found in sitemap',
+        url,
+        total_urls: 0,
+        suggestions: [
+          'Check if sitemap URL is correct',
+          'Try /sitemap.xml, /sitemap_index.xml, or /robots.txt',
+          'Verify sitemap is publicly accessible'
+        ]
+      });
     }
     
-    res.json({ 
-      success: true, 
-      urls: urls.slice(0, max_urls),
-      count: urls.length,
-      total_found: urls.length,
-      deep_crawl_used: deep_crawl,
-      max_depth_reached: deep_crawl ? max_depth : 1
+    // Enhanced clustering analysis
+    const clustering = analyzeUrlClustering(urls);
+    
+    res.json({
+      success: true,
+      url,
+      extracted_at: new Date().toISOString(),
+      
+      // Sitemap data
+      sitemap_data: {
+        total_urls: urls.length,
+        urls: urls,
+        deep_crawl_used: deep_crawl,
+        max_depth_reached: max_depth
+      },
+      
+      // Clustering analysis
+      clustering_analysis: clustering,
+      
+      // Quick stats
+      stats: {
+        url_count: urls.length,
+        unique_main_categories: Object.keys(clustering.by_main_category).length,
+        deepest_level: Math.max(...Object.keys(clustering.by_depth).map(k => parseInt(k.replace('depth_', '')))),
+        most_common_category: Object.entries(clustering.by_main_category)
+          .sort(([,a], [,b]) => b - a)[0]?.[0] || 'none'
+      }
     });
     
   } catch (err) {
-    console.error('Sitemap error:', err.message);
+    console.error('Sitemap analysis error:', err.message);
     res.status(500).json({ 
+      success: false,
       error: 'Sitemap analysis failed', 
-      details: err.message 
+      details: err.message,
+      url: req.body.url || 'unknown'
     });
   }
 });
@@ -270,65 +376,7 @@ app.post('/schema', async (req, res) => {
   }
 });
 
-// 4. URL Clustering
-app.post('/cluster', async (req, res) => {
-  try {
-    const { url, level = 2, max_urls = 500 } = req.body;
-    if (!url) return res.status(400).json({ error: 'Missing url parameter' });
-    if (level < 1 || level > 5) return res.status(400).json({ error: 'Level must be 1-5' });
-    
-    console.log('URL clustering:', url, 'level:', level);
-    
-    // Get URLs from sitemap (recursive)
-    const urls = await getAllUrlsFromSitemap(url, 2, 0, max_urls);
-    
-    // Cluster by directory level
-    const clusters = {};
-    const pathAnalysis = {};
-    
-    urls.forEach(urlString => {
-      try {
-        const urlObj = new URL(urlString);
-        const pathParts = urlObj.pathname.split('/').filter(Boolean);
-        
-        // Clustering
-        const clusterKey = pathParts[level - 1] || 'root';
-        clusters[clusterKey] = (clusters[clusterKey] || 0) + 1;
-        
-        // Path analysis
-        const fullPath = pathParts.join('/');
-        if (fullPath) {
-          pathAnalysis[fullPath] = (pathAnalysis[fullPath] || 0) + 1;
-        }
-      } catch (e) {
-        // Skip invalid URLs
-      }
-    });
-    
-    // Sort clusters by count
-    const sortedClusters = Object.entries(clusters)
-      .sort(([,a], [,b]) => b - a)
-      .reduce((obj, [key, value]) => ({ ...obj, [key]: value }), {});
-    
-    res.json({
-      success: true,
-      cluster_by: `dir_${level}`,
-      clusters: sortedClusters,
-      total_urls: urls.length,
-      unique_clusters: Object.keys(clusters).length,
-      top_paths: Object.entries(pathAnalysis)
-        .sort(([,a], [,b]) => b - a)
-        .slice(0, 10)
-        .map(([path, count]) => ({ path, count }))
-    });
-    
-  } catch (err) {
-    console.error('Clustering error:', err.message);
-    res.status(500).json({ error: 'URL clustering failed', details: err.message });
-  }
-});
-
-// 5. Entity Validation
+// 4. Entity Validation
 app.post('/validate-entity', (req, res) => {
   try {
     const { type, properties } = req.body;
@@ -411,7 +459,7 @@ app.post('/validate-entity', (req, res) => {
   }
 });
 
-// 6. Existing Schema Extraction
+// 5. Existing Schema Extraction
 app.post('/existing-schema', async (req, res) => {
   try {
     const { url } = req.body;
@@ -553,10 +601,9 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   console.log(`🚀 Complete Schema API v2.0 ready on port ${PORT}!`);
   console.log('📋 Features:');
-  console.log('  ✅ Recursive sitemap crawling');
+  console.log('  ✅ Complete sitemap analysis with clustering');
   console.log('  ✅ Hebrew + English text analysis');
   console.log('  ✅ Smart Schema.org generation');
-  console.log('  ✅ URL clustering with path analysis');
   console.log('  ✅ Comprehensive entity validation');
   console.log('  ✅ Multi-format schema extraction');
 });
