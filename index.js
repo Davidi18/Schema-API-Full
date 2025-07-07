@@ -79,24 +79,27 @@ function analyzeUrlClustering(urls) {
       const pathParts = urlObj.pathname.split('/').filter(Boolean);
       const hasParams = urlObj.search.length > 0;
       
-      // 1. Smart main category analysis (handles Hebrew URL encoding)
+      // 1. Smart main category analysis (handles multilingual sites)
       let mainCategory = pathParts[0] || 'root';
       
-      // If first segment is URL-encoded Hebrew, try to decode or use next segment
-      if (mainCategory.includes('%D7%') || mainCategory.includes('%D6%')) {
+      // Check if first segment is a language code (en, he, fr, etc.)
+      const isLanguageCode = mainCategory.length === 2 && mainCategory.match(/^[a-z]{2}$/);
+      
+      if (isLanguageCode && pathParts.length > 1) {
+        // If it's a language code, use the next segment as the main category
+        mainCategory = pathParts[1];
+      } else if (mainCategory.includes('%D7%') || mainCategory.includes('%D6%')) {
+        // Handle Hebrew URL encoding
         try {
-          // Try to decode the Hebrew text
           const decoded = decodeURIComponent(mainCategory);
-          // If successfully decoded and looks like Hebrew, use it
           if (decoded && decoded.match(/[\u0590-\u05FF]/)) {
             mainCategory = decoded;
           }
         } catch (e) {
-          // If decoding fails and there's a next segment, check if it's a known category
+          // If decoding fails and there's a next segment, use it
           if (pathParts.length > 1) {
             const nextSegment = pathParts[1];
-            // If next segment looks like English category, use it instead
-            if (nextSegment && !nextSegment.includes('%') && nextSegment.match(/^[a-zA-Z-]+$/)) {
+            if (nextSegment && !nextSegment.includes('%')) {
               mainCategory = nextSegment;
             }
           }
